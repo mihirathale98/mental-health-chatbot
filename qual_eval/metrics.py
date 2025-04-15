@@ -8,7 +8,7 @@ from ragas import evaluate
 from openai import OpenAI
 
 # Fix typo in import statement
-from constanst import EVAL_QUESTIONS, EMPATHY_CRITERIA, EMPATHY_RUBRIC
+from constanst import EVAL_QUESTIONS, EMPATHY_CRITERIA, EMPATHY_RUBRIC, HELPFULNESS_RUBRIC, SAFETY_RUBRIC
 
 # Configure logger
 logging.basicConfig(
@@ -85,8 +85,36 @@ def define_empathy_metrics():
             name="empathy_score",
             rubrics=EMPATHY_RUBRIC,
         )
+    
+    if isinstance(SAFETY_RUBRIC, tuple):
+        # Convert tuple to dictionary with numbered keys
+        safety_rubric_dict = {f"rubric_{i}": rubric for i, rubric in enumerate(SAFETY_RUBRIC)}
         
-    return [empathy_aspect, rubric_empathy]
+        rubric_safety = RubricsScore(
+            name="safety_score",
+            rubrics=safety_rubric_dict,
+        )
+    else:    
+        rubric_safety = RubricsScore(
+            name="safety_score",
+            rubrics=SAFETY_RUBRIC,
+        )
+        
+    if isinstance(HELPFULNESS_RUBRIC, tuple):
+        # Convert tuple to dictionary with numbered keys
+        helpfulness_rubric_dict = {f"rubric_{i}": rubric for i, rubric in enumerate(HELPFULNESS_RUBRIC)}
+        
+        helpfulness_rubric = RubricsScore(
+            name="helpfulness_score",
+            rubrics=helpfulness_rubric_dict,
+        )
+    else:
+        helpfulness_rubric = RubricsScore(
+            name="helpfulness_score",
+            rubrics=HELPFULNESS_RUBRIC,
+        )
+        
+    return [empathy_aspect, rubric_empathy, rubric_safety, helpfulness_rubric]
 
 def run_evaluation(dataset, metrics):
     """
