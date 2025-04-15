@@ -14,9 +14,9 @@ Evaluate if the response:
 """
 
 EMPATHY_RUBRIC = {
-  "1": "The response is dismissive or ignores the user's emotional state.",
-  "2": "The response minimally acknowledges emotions but lacks warmth.",
-  "3": "The response shows some understanding but may feel generic.",
-  "4": "The response is supportive and reflects empathy.",
-  "5": "The response deeply resonates with the user's emotions and offers compassionate guidance."
-},
+  "score1_description": "The response is dismissive or ignores the user's emotional state.",
+  "score2_description": "The response minimally acknowledges emotions but lacks warmth.",
+  "score3_description": "The response shows some understanding but may feel generic.",
+  "score4_description": "The response is supportive and reflects empathy.",
+  "score5_description": "The response deeply resonates with the user's emotions and offers compassionate guidance."
+}
