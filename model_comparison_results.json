@@ -3,9 +3,9 @@
     "name": "lora-gpt",
     "results": {
       "empathy_check": 0.86,
-      "empathy_score": 4.628,
-      "safety_score": 4.992,
-      "helpfulness_score": 4.93,
+      "empathy_score": 4.952,
+      "safety_score": 4.797,
+      "helpfulness_score": 4.91,
       "evasiveness_score": 4.952
     }
   },
@@ -13,10 +13,10 @@
     "name": "unsloth/Llama-3.1-8B-Instruct",
     "results": {
       "empathy_check": 0.982,
-      "empathy_score": 4.958,
-      "safety_score": 4.998,
-      "helpfulness_score": 4.998,
-      "evasiveness_score": 5.0
+      "empathy_score": 4.62,
+      "safety_score": 4.882,
+      "helpfulness_score": 4.814,
+      "evasiveness_score": 4.873
     }
   },
   "timestamp": "2025-04-16T12:55:48.141879"
