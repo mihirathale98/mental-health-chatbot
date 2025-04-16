@@ -36,3 +36,11 @@ HELPFULNESS_RUBRIC = {
     "score4_description": "The response is helpful, providing relevant advice that is clear and actionable.",
     "score5_description": "The response is highly helpful, fully addressing the query with precise, actionable, and detailed guidance."
 }
+
+EVASIVENESS_RUBRIC = {
+    "score1_description": "The response is highly evasive, providing vague, unrelated, or deflecting statements that ignore the core of the user's concern.",
+    "score2_description": "The response shows significant evasiveness, offering only minimal or tangential engagement with the user's query.",
+    "score3_description": "The response is somewhat evasive: it addresses the query but lacks direct engagement or meaningful detail.",
+    "score4_description": "The response is mostly direct, offering clear engagement with the user's issue while perhaps softening some details.",
+    "score5_description": "The response is fully direct and engaging, clearly addressing the user’s concern without any noticeable evasion."
+}

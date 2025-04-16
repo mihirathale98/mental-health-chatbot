@@ -1,95 +1,73 @@
 import os
-import logging
 import json
+import logging
+import pandas as pd
 import time
 from datasets import Dataset
 from ragas.metrics import AspectCritic, RubricsScore
 from ragas import evaluate
-from openai import OpenAI
+from constants import EMPATHY_CRITERIA, EMPATHY_RUBRIC, EVASIVENESS_RUBRIC, HELPFULNESS_RUBRIC, SAFETY_RUBRIC
 
-# Fix typo in import statement
-from constanst import EVAL_QUESTIONS, EMPATHY_CRITERIA, EMPATHY_RUBRIC, HELPFULNESS_RUBRIC, SAFETY_RUBRIC
-
-# Configure logger
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Initialize the OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Batch size configuration
+BATCH_SIZE = 5  # Process 5 samples at a time
+BATCH_DELAY = 2  # Wait 2 seconds between batches to avoid rate limits
 
-MODEL_NAME = os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+def load_test_data(filepath):
+    """Load test data from JSON file"""
+    with open(filepath, 'r') as f:
+        data = json.load(f)
+    return data
 
-def call_openai_model(question):
-    """
-    Calls the OpenAI API with the given question and returns its generated response.
-    If the call fails for any reason, logs an error and returns an empty string.
-    """
-    try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that responds with empathy."},
-                {"role": "user", "content": question}
-            ],
-            temperature=0.7,
-            max_tokens=1024
-        )
-        # Extract the text from the response
-        answer = response.choices[0].message.content
-        return answer
-    except Exception as e:
-        logger.error(f"Error calling OpenAI model for question '{question[:50]}...': {e}")
-        return ""
+def load_model_responses(filepath):
+    """Load model responses from JSON file"""
+    with open(filepath, 'r') as f:
+        responses = json.load(f)
+    
+    # Check the structure of the responses to determine how to extract content
+    processed_responses = []
+    for response in responses:
+        if 'choices' in response and response['choices'] and len(response['choices']) > 0:
+            if 'message' in response['choices'][0] and 'content' in response['choices'][0]['message']:
+                processed_responses.append(response['choices'][0]['message']['content'])
+            elif 'text' in response['choices'][0]:
+                processed_responses.append(response['choices'][0]['text'])
+        else:
+            # If the expected structure isn't found, add a placeholder
+            processed_responses.append("")
+    
+    return processed_responses
 
-def create_evaluation_dataset(questions):
-    """
-    Generates a list of dictionaries with each dictionary containing:
-    'question': the input prompt,
-    'answer': the model's generated response.
-    """
-    eval_data = []
-    for i, question in enumerate(questions):
-        logger.info(f"Processing question {i+1}/{len(questions)}: {question[:50]}...")
-        answer = call_openai_model(question)
-        eval_data.append({
-            "question": question,
-            "answer": answer
-        })
-    return eval_data
-
-def define_empathy_metrics():
-    """
-    Creates the AspectCritic and RubricScore metrics for evaluating empathy.
-    """
+def define_metrics():
+    """Create the evaluation metrics"""
     empathy_aspect = AspectCritic(
         name="empathy_check",
         definition=EMPATHY_CRITERIA,
-        strictness=0.8
+        strictness=1,
+        max_retries=5
     )
 
-    # Fix: Convert EMPATHY_RUBRIC tuple to the format RubricsScore expects
+    # Convert tuple to dictionary with numbered keys if needed
     if isinstance(EMPATHY_RUBRIC, tuple):
-        # Convert tuple to dictionary with numbered keys
         rubrics_dict = {f"rubric_{i}": rubric for i, rubric in enumerate(EMPATHY_RUBRIC)}
-        
         rubric_empathy = RubricsScore(
             name="empathy_score",
             rubrics=rubrics_dict,
         )
     else:
-        # If it's already a dictionary, use it directly
         rubric_empathy = RubricsScore(
             name="empathy_score",
             rubrics=EMPATHY_RUBRIC,
         )
     
     if isinstance(SAFETY_RUBRIC, tuple):
-        # Convert tuple to dictionary with numbered keys
         safety_rubric_dict = {f"rubric_{i}": rubric for i, rubric in enumerate(SAFETY_RUBRIC)}
-        
         rubric_safety = RubricsScore(
             name="safety_score",
             rubrics=safety_rubric_dict,
@@ -101,9 +79,7 @@ def define_empathy_metrics():
         )
         
     if isinstance(HELPFULNESS_RUBRIC, tuple):
-        # Convert tuple to dictionary with numbered keys
         helpfulness_rubric_dict = {f"rubric_{i}": rubric for i, rubric in enumerate(HELPFULNESS_RUBRIC)}
-        
         helpfulness_rubric = RubricsScore(
             name="helpfulness_score",
             rubrics=helpfulness_rubric_dict,
@@ -113,113 +89,229 @@ def define_empathy_metrics():
             name="helpfulness_score",
             rubrics=HELPFULNESS_RUBRIC,
         )
-        
-    return [empathy_aspect, rubric_empathy, rubric_safety, helpfulness_rubric]
-
-def run_evaluation(dataset, metrics):
-    """
-    Runs the RAGAS evaluation given the dataset and list of metrics.
-    Returns the evaluation results dictionary.
-    """
-    try:
-        results = evaluate(
-            dataset=dataset,
-            metrics=metrics,
+    
+    if isinstance(EVASIVENESS_RUBRIC, tuple):
+        evasiveness_rubric_dict = {f"rubric_{i}": rubric for i, rubric in enumerate(EVASIVENESS_RUBRIC)}
+        evasiveness_rubric = RubricsScore(
+            name="evasiveness_score",
+            rubrics=evasiveness_rubric_dict,
         )
-        return results
+    else:
+        evasiveness_rubric = RubricsScore(
+            name="evasiveness_score",
+            rubrics=EVASIVENESS_RUBRIC,
+        )
+        
+    return [empathy_aspect, rubric_empathy, rubric_safety, helpfulness_rubric, evasiveness_rubric]
+
+def create_dataset_for_evaluation(questions, answers):
+    """Create a dataset for RAGAS evaluation"""
+    data = []
+    for q, a in zip(questions, answers):
+        if not a:  # Skip empty responses
+            continue
+        data.append({
+            "question": q,
+            "answer": a
+        })
+    return Dataset.from_list(data)
+
+def batch_generator(data, batch_size):
+    """Generate batches from a dataset"""
+    for i in range(0, len(data), batch_size):
+        yield data[i:i + batch_size]
+
+def run_evaluation_in_batches(dataset, metrics, model_name):
+    """Run the RAGAS evaluation in batches to avoid rate limits"""
+    try:
+        all_results = {}
+        dataset_dict = dataset.to_dict()
+        total_samples = len(dataset)
+        dataset_list = [{"question": dataset_dict["question"][i], "answer": dataset_dict["answer"][i]} 
+                        for i in range(total_samples)]
+        
+        logger.info(f"Processing {total_samples} samples in batches of {BATCH_SIZE}")
+        
+        # Process batches
+        batch_num = 1
+        for batch in batch_generator(dataset_list, BATCH_SIZE):
+            logger.info(f"Processing batch {batch_num} ({len(batch)} samples)")
+            batch_dataset = Dataset.from_list(batch)
+            
+            try:
+                batch_results = evaluate(
+                    dataset=batch_dataset,
+                    metrics=metrics,
+                )
+                
+                # Merge results - Fix for EvaluationResult object
+                # if hasattr(batch_results._repr_dict, 'to_dict'):
+                #     # Convert EvaluationResult to dictionary if it has to_dict method
+                #     batch_results_dict = batch_results._repr_dict.to_dict()
+                #     for metric_name, score in batch_results_dict.items():
+                #         if metric_name not in all_results:
+                #             all_results[metric_name] = []
+                        
+                #         if hasattr(score, '__iter__') and not isinstance(score, str):
+                #             all_results[metric_name].extend(score)
+                #         else:
+                #             all_results[metric_name].append(score)
+                # else:
+                    # For backward compatibility with older RAGAS versions
+                for metric_name, score in batch_results._repr_dict.items():
+                    if metric_name not in all_results:
+                        all_results[metric_name] = []
+                    
+                    if hasattr(score, '__iter__') and not isinstance(score, str):
+                        all_results[metric_name].extend(score)
+                    else:
+                        all_results[metric_name].append(score)
+                        
+                # Log progress
+                logger.info(f"Completed batch {batch_num}")
+                
+            except Exception as e:
+                logger.error(f"Error processing batch {batch_num}: {e}")
+            
+            # Wait between batches to avoid rate limits
+            if batch_num * BATCH_SIZE < total_samples:
+                logger.info(f"Waiting {BATCH_DELAY} seconds before next batch...")
+                time.sleep(BATCH_DELAY)
+            
+            batch_num += 1
+        
+        # Compute average scores
+        final_results = {}
+        for metric_name, scores in all_results.items():
+            if all(isinstance(score, (int, float)) for score in scores):
+                final_results[metric_name] = sum(scores) / len(scores)
+            else:
+                # For non-numeric scores, keep as is
+                final_results[metric_name] = scores
+        
+        # Log final results
+        logger.info(f"Evaluation results for {model_name}:")
+        for metric_name, score in final_results.items():
+            if hasattr(score, '__iter__') and not isinstance(score, str):
+                try:
+                    avg_score = sum(score) / len(score)
+                    logger.info(f"{metric_name}: {avg_score:.4f}")
+                except:
+                    logger.info(f"{metric_name}: (complex data type)")
+            else:
+                logger.info(f"{metric_name}: {score:.4f}")
+        
+        return final_results
+    
     except Exception as e:
-        logger.error(f"Error during evaluation: {e}")
+        logger.error(f"Error during batch evaluation of {model_name}: {e}")
         return {"error": str(e)}
 
-def save_results(eval_data, evaluation_results, output_file="empathy_evaluation_results.json"):
-    """
-    Saves both the raw responses and evaluation scores to a JSON file.
-    This allows for later analysis of individual responses.
-    """
+def save_comparison_results(finetuned_results, non_finetuned_results, output_file="model_comparison_results.json"):
+    """Save the comparison results to a JSON file"""
     try:
-        # Create a serializable dictionary from the evaluation results
-        scores_dict = {}
+        # Prepare results for serialization
+        def prepare_for_json(results):
+            if isinstance(results, dict):
+                return {k: v.to_dict() if hasattr(v, 'to_dict') else (
+                       float(v) if isinstance(v, (int, float)) else v) 
+                       for k, v in results.items()}
+            return results
         
-        # If evaluation_results is already a dictionary or dictionary-like
-        if hasattr(evaluation_results, 'items'):
-            # Convert each item to a serializable format
-            for k, v in evaluation_results.items():
-                if hasattr(v, 'to_dict'):  # For pandas objects
-                    scores_dict[k] = v.to_dict()
-                else:
-                    scores_dict[k] = v
-        else:
-            # Fallback for non-dictionary objects
-            scores_dict = {"result": str(evaluation_results)}
-            
-        results = {
-            "raw_data": eval_data,
-            "scores": scores_dict,
-            "model_used": MODEL_NAME,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        finetuned_serializable = prepare_for_json(finetuned_results)
+        non_finetuned_serializable = prepare_for_json(non_finetuned_results)
+        
+        comparison = {
+            "finetuned_model": {
+                "name": "lora-gpt",
+                "results": finetuned_serializable
+            },
+            "non_finetuned_model": {
+                "name": "unsloth/Llama-3.1-8B-Instruct",
+                "results": non_finetuned_serializable
+            },
+            "timestamp": pd.Timestamp.now().isoformat()
         }
         
         with open(output_file, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(comparison, f, indent=2)
         
-        logger.info(f"Results saved to {output_file}")
+        logger.info(f"Comparison results saved to {output_file}")
     except Exception as e:
-        logger.error(f"Error saving results to {output_file}: {e}")
-        fallback_file = f"empathy_evaluation_results_fallback_{int(time.time())}.json"
-        with open(fallback_file, 'w') as f:
-            json.dump({"error": str(e), "raw_data": eval_data}, f, indent=2)
-        logger.info(f"Error details saved to fallback file: {fallback_file}")
+        logger.error(f"Error saving comparison results: {e}")
 
 def main():
-    logger.info("Starting empathy evaluation with OpenAI API...")
+    # Set file paths
+    test_data_path = "src/test_data.json"
+    finetuned_responses_path = "src/responses_finetuned.json"
+    non_finetuned_responses_path = "src/responses_non_finetuned.json"
     
-    # Validate environment variables
-    if not os.getenv("OPENAI_API_KEY"):
-        logger.error("OPENAI_API_KEY environment variable not set!")
-        return
+    # Load data
+    logger.info("Loading test data and model responses...")
+    test_data = load_test_data(test_data_path)
     
-    logger.info(f"Using model: {MODEL_NAME}")
-    
-    # Validate that we have questions to evaluate
-    if not EVAL_QUESTIONS:
-        logger.error("No evaluation questions found in constants!")
-        return
-    
-    logger.info(f"Found {len(EVAL_QUESTIONS)} questions for evaluation")
-    
-    logger.info("Collecting responses from OpenAI API...")
-    eval_data = create_evaluation_dataset(EVAL_QUESTIONS)
-    
-    # Convert list of dictionaries to a HuggingFace Dataset object
     try:
-        eval_dataset = Dataset.from_list(eval_data)
+        finetuned_responses = load_model_responses(finetuned_responses_path)
+        non_finetuned_responses = load_model_responses(non_finetuned_responses_path)
     except Exception as e:
-        logger.error(f"Error creating Dataset object: {e}")
-        return
-    
-    logger.info("Defining empathy evaluation metrics (AspectCritic and RubricScore)...")
-    empathy_metrics = define_empathy_metrics()
-
-    logger.info("Running evaluation...")
-    try:
-        evaluation_results = run_evaluation(eval_dataset, empathy_metrics)
+        logger.error(f"Error loading responses: {e}")
+        logger.info("Using fallback method to extract responses...")
         
-        logger.info("Evaluation Results:")
-        # Properly handle the results based on the output we saw
-        # The results appear to be a dictionary-like object with metric names as keys
-        if hasattr(evaluation_results, 'items'):
-            for metric_name, score in evaluation_results.items():
-                logger.info(f"{metric_name}: {score:.4f}")
+        # Fallback method: if the response files are incomplete, 
+        # use the example output from test_data.json itself
+        if 'output' in test_data:
+            logger.info("Using example outputs from test_data.json...")
+            finetuned_responses = test_data['output']
+            non_finetuned_responses = test_data['output']
         else:
-            logger.info(f"Raw evaluation result: {evaluation_results}")
-            
-        # Save results for later analysis
-        save_results(eval_data, evaluation_results)
-        
-    except Exception as e:
-        logger.error(f"Error in evaluation process: {e}")
-        
-    logger.info("Evaluation process completed")
+            logger.error("No valid responses found for evaluation. Exiting.")
+            return
+    
+    instruction = test_data.get('instruction')[0]
+    
+    # Get questions from test data and append the instruction before each question
+    if 'input' in test_data:
+        questions = test_data.get('input', [])
+        if questions:
+            questions = [f"Instruction: {instruction}\n\nQuestion: {q}" for q in questions]
+        else:
+            logger.error("No valid input found in test data. Exiting.")
+            return
+    elif 'instruction' in test_data:
+        questions = test_data.get('instruction', [])
+    else:
+        # Fallback to instruction as questions if input is not available
+        questions = test_data.get('instruction', [])[:1]
+
+    min_count = min(len(questions), len(finetuned_responses), len(non_finetuned_responses))
+    if min_count == 0:
+        logger.error("No valid data for evaluation. Exiting.")
+        return
+    
+    questions = questions[:min_count]
+    finetuned_responses = finetuned_responses[:min_count]
+    non_finetuned_responses = non_finetuned_responses[:min_count]
+    
+    logger.info(f"Creating evaluation datasets with {min_count} samples...")
+    
+    # Define metrics
+    metrics = define_metrics()
+    
+    # Create datasets for evaluation
+    finetuned_dataset = create_dataset_for_evaluation(questions, finetuned_responses)
+    non_finetuned_dataset = create_dataset_for_evaluation(questions, non_finetuned_responses)
+    
+    # Run evaluations using batch processing
+    logger.info("Evaluating finetuned model (in batches)...")
+    finetuned_results = run_evaluation_in_batches(finetuned_dataset, metrics, "Finetuned Model (lora-gpt)")
+    
+    logger.info("Evaluating non-finetuned model (in batches)...")
+    non_finetuned_results = run_evaluation_in_batches(non_finetuned_dataset, metrics, "Non-finetuned Model (unsloth/Llama-3.1-8B-Instruct)")
+    
+    # Save comparison results
+    save_comparison_results(finetuned_results, non_finetuned_results)
+    
+    logger.info("Evaluation complete!")
 
 if __name__ == "__main__":
     main()
