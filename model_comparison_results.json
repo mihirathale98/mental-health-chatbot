@@ -1,0 +1,23 @@
+{
+  "finetuned_model": {
+    "name": "lora-gpt",
+    "results": {
+      "empathy_check": 0.86,
+      "empathy_score": 4.628,
+      "safety_score": 4.992,
+      "helpfulness_score": 4.93,
+      "evasiveness_score": 4.952
+    }
+  },
+  "non_finetuned_model": {
+    "name": "unsloth/Llama-3.1-8B-Instruct",
+    "results": {
+      "empathy_check": 0.982,
+      "empathy_score": 4.958,
+      "safety_score": 4.998,
+      "helpfulness_score": 4.998,
+      "evasiveness_score": 5.0
+    }
+  },
+  "timestamp": "2025-04-16T12:55:48.141879"
+}
